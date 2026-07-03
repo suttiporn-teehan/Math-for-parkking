@@ -39,6 +39,7 @@
             font-weight: bold;
             margin-bottom: 5px;
             color: #34495e;
+            font-size: 14px;
         }
         input, select {
             padding: 10px;
@@ -58,7 +59,7 @@
             border-left: 5px solid #27ae60;
         }
         canvas {
-            background-color: #222; /* พื้นลานจอดรถสีดำ */
+            background-color: #222;
             display: block;
             margin: 0 auto;
             border-radius: 8px;
@@ -79,26 +80,31 @@
     
     <div class="grid">
         <div class="input-group">
-            <label>ความยาวพื้นที่ทั้งหมด L_total (เมตร):</label>
+            <label>ความยาวของพื้นที่จอดรถทั้งหมดแนวราบ (H) (เมตร):</label>
             <input type="number" id="L_total" value="60" oninput="calculateParking()">
         </div>
         <div class="input-group">
-            <label>ความกว้างพื้นที่ทั้งหมด W_total (เมตร):</label>
+            <label>ความกว้างของพื้นที่จอดรถทั้งหมดแนวลึก (D) (เมตร):</label>
             <input type="number" id="W_total" value="32" oninput="calculateParking()">
         </div>
         <div class="input-group">
-            <label>ความกว้างรถ W_car (เมตร):</label>
+            <label>ความกว้างรถ (W_car) (เมตร):</label>
             <input type="number" id="W_car" value="2.5" step="0.1" oninput="calculateParking()">
         </div>
         <div class="input-group">
-            <label>ความยาวรถ L_car (เมตร):</label>
+            <label>ความยาวรถ (L_car) (เมตร):</label>
             <input type="number" id="L_car" value="5.5" step="0.1" oninput="calculateParking()">
+        </div>
+        <div class="input-group">
+            <label for="W_aisle">ความกว้างของช่องทางวิ่งรถยนต์ (Road) (เมตร):</label>
+            <input type="number" id="W_aisle" value="3.6" step="0.1" oninput="calculateParking()">
+            <div id="aisleInfo" style="font-size: 11px; color: #7f8c8d; margin-top: 2px;">แนะนำขั้นต่ำ 3.6 เมตร สำหรับเลนเดียวที่มีรถจอดสองฝั่ง</div>
         </div>
         <div class="input-group">
             <label>มุมที่ต้องการจอด (องศา):</label>
             <select id="theta" onchange="calculateParking()">
-                <option value="45" selected>45 องศา (แนวเฉียง)</option>
-                <option value="60">60 องศา (แนวเฉียง)</option>
+                <option value="45">45 องศา (แนวเฉียง)</option>
+                <option value="60" selected>60 องศา (แนวเฉียง)</option>
                 <option value="30">30 องศา (แนวเฉียง)</option>
                 <option value="90">90 องศา (แนวตรง)</option>
                 <option value="0">0 องศา (จอดขนานฟุตบาท)</option>
@@ -108,7 +114,7 @@
             <label>รูปแบบการจัดแถวจอดรถ (มีผลเฉพาะมุมเฉียง):</label>
             <select id="layoutStyle" onchange="calculateParking()">
                 <option value="standard">แบบมาตรฐานแยกแถว (Standard)</option>
-                <option value="interlocking">แบบหัวรถชนหัวรถสลับฟันปลา (Head-to-Head)</option>
+                <option value="interlocking" selected>แบบหัวรถชนหัวรถสลับฟันปลา (Head-to-Head)</option>
             </select>
         </div>
     </div>
@@ -118,87 +124,127 @@
     </div>
 
     <canvas id="parkingCanvas" width="900" height="420"></canvas>
-    <div class="info" id="debugInfo">* แผนผังจำลองปรับขนาดอัตโนมัติ ล็อกระยะทางวิ่งตรงกลางกว้าง 6.0 เมตรคงที่</div>
+    <div class="info" id="debugInfo">* แผนผังจำลองปรับขนาดอัตโนมัติ</div>
 </div>
 
 <script>
 function calculateParking() {
-    const L_total = parseFloat(document.getElementById('L_total').value);
-    const W_total = parseFloat(document.getElementById('W_total').value);
+    // กำหนดตัวแปรตามสมการในเอกสารโครงงาน
+    const H = parseFloat(document.getElementById('L_total').value); // ความยาวรวม (Horizontal Length)
+    const D = parseFloat(document.getElementById('W_total').value); // ความลึกรวม (Deep line)
     const W_car = parseFloat(document.getElementById('W_car').value);
     const L_car = parseFloat(document.getElementById('L_car').value);
+    const R = parseFloat(document.getElementById('W_aisle').value);  // ความกว้างถนน (Road)
     const thetaDeg = parseFloat(document.getElementById('theta').value);
     const layoutStyle = document.getElementById('layoutStyle').value;
     
-    // ล็อกระยะช่องทางวิ่ง (Aisle Width) ไว้ที่ 6.0 เมตรคงที่ในทุกรูปแบบตามเงื่อนไขของหนู
-    const W_aisle = 6.0; 
-
     let N_per_row = 0;
     let L_projected = 0;
     let interlockingSave = 0;
+    let rows = 0;
 
-    // 🌟 ตรรกะแยกเงื่อนไขตามทฤษฎีคณิตศาสตร์ ม.3
+    // --- ส่วนการตรวจสอบความกว้างทางวิ่ง ---
+    let minAisleWidth = 3.6; 
     if (thetaDeg === 0) {
-        // --- 📐 1. ทฤษฎีการจอดแนวขนาน (Parallel) ---
-        L_projected = W_car; // ระยะลึกเท่ากับความกว้างซองจอดรถ (2.5 เมตร)
-        N_per_row = Math.floor(L_total / 6); // ช่องจอดรวมระยะปลอดภัยในการถอยคงที่ 6 เมตร
-        interlockingSave = 0;
+        minAisleWidth = 3.0; 
+    } else if (thetaDeg === 90 || (thetaDeg > 0 && thetaDeg < 90 && layoutStyle === 'standard')) {
+        minAisleWidth = 4.0; 
+    } else if (thetaDeg > 0 && thetaDeg < 90 && layoutStyle === 'interlocking') {
+        minAisleWidth = 3.6; 
+    }
+    
+    const aisleInfo = document.getElementById('aisleInfo');
+    if (thetaDeg === 0) {
+        aisleInfo.innerText = "แนะนำขั้นต่ำ 3.0 เมตร สำหรับเลนเดียวที่มีรถจอดขนาน";
     } else {
-        // --- 📐 2. ทฤษฎีการจอดแนวเฉียงและแนวตรง ---
-        const rad = thetaDeg * Math.PI / 180;
+        aisleInfo.innerText = `แนะนำขั้นต่ำ ${minAisleWidth.toFixed(1)} เมตร สำหรับเลนเดียวที่มีรถจอดสองฝั่ง`;
+    }
+
+    // --- 1. การคำนวณแบบขนานกับถนน (0 องศา) ตามหัวข้อ 4.1.3 ---
+    if (thetaDeg === 0) {
+        // ระยะลึกของช่องจอดขนาน คือ ความกว้างของรถ
+        L_projected = W_car; 
         
-        // สูตรข้อ 4: คำนวณจำนวนรถต่อแถว (หัก Wasted Space หัวท้ายแถวออก 2 ข้าง)
-        const wastedSpace = L_car * Math.cos(rad);
-        const effectiveWidth = W_car / Math.sin(rad);
-        N_per_row = Math.floor((L_total - (2 * wastedSpace)) / effectiveWidth);
+        // ความยาวช่องจอดขนาน (เผื่อระยะหน้า-หลัง 0.5 เมตร)
+        const L_car_parallel = L_car + 0.5; 
         
-        // สำหรับกรณีมุม 90 องศา ปลายแถวไม่เสียเศษเฉียง ให้คำนวณแบบหารตรงปกติ
-        if (thetaDeg === 90) {
-            N_per_row = Math.floor(L_total / W_car);
+        // จำนวนรถที่จอดได้ต่อ 1 แถว: Floor( H / L_car_parallel )
+        N_per_row = Math.floor(H / L_car_parallel); 
+        if (N_per_row < 0) N_per_row = 0;
+
+        // จำนวนแถวสูงสุด: Floor( (D - W_car) / (W_car + R) ) + 1
+        if (D >= L_projected) {
+            rows = Math.floor((D - L_projected) / (L_projected + R)) + 1;
         }
 
-        // สูตรข้อ 3: ระยะลึกสุทธิของซองจอดในแนวตั้งฉาก
+        interlockingSave = 0;
+    } 
+    // --- 2. การคำนวณแบบจอดทำมุม (เฉียงและตั้งฉาก) ---
+    else {
+        const rad = thetaDeg * Math.PI / 180;
+        const wastedSpace = L_car * Math.cos(rad);
+        const effectiveWidth = W_car / Math.sin(rad);
+        
+        N_per_row = Math.floor((H - (2 * wastedSpace)) / effectiveWidth);
+        
+        if (thetaDeg === 90) {
+            N_per_row = Math.floor(H / W_car);
+        }
+
         L_projected = L_car * Math.sin(rad);
         
-        // คำนวณระยะประหยัดกรณีหัวชนหัวสลับฟันปลา
         if (layoutStyle === "interlocking" && thetaDeg < 90) {
             interlockingSave = W_car * Math.cos(rad); 
+        }
+
+        // การคำนวณจำนวนแถวแบบแม่นยำสูง
+        if (D >= L_projected) {
+            if (layoutStyle === "interlocking" && thetaDeg > 0 && thetaDeg < 90) {
+                let blockDepth = (2 * L_projected) - interlockingSave + R;
+                let testRows = 0;
+                while (true) {
+                    let pairs = Math.floor(testRows / 2);
+                    let single = testRows % 2;
+                    let depthNeeded = pairs * blockDepth;
+                    
+                    if (single === 1) {
+                        depthNeeded += (2 * L_projected - interlockingSave);
+                    } else {
+                        depthNeeded += L_projected;
+                    }
+                    
+                    if (depthNeeded <= D) {
+                        testRows++;
+                    } else {
+                        break;
+                    }
+                }
+                rows = testRows;
+            } else {
+                rows = Math.floor((D - L_projected) / (L_projected + R)) + 1;
+            }
         }
     }
     
     if(isNaN(N_per_row) || N_per_row < 0) N_per_row = 0;
 
-    // สูตรข้อ 5: คำนวณหาจำนวนแถวสูงสุด (Rows)
-    let rows = 0;
-    if (W_total >= L_projected) {
-        if (layoutStyle === "interlocking" && thetaDeg > 0 && thetaDeg < 90) {
-            // สูตรคิดแถวสลับฟันปลาหัวชนหัว
-            rows = Math.floor((W_total - L_projected) / (L_projected + W_aisle - (interlockingSave / 2))) + 1;
-        } else {
-            // สูตรคิดแถวตรงแบบมาตรฐานแยกแถว (ใช้ได้ทั้งแนวเฉียงและแนวขนาน 0 องศา)
-            rows = Math.floor((W_total - L_projected) / (L_projected + W_aisle)) + 1;
-        }
-    }
-
-    // สูตรข้อ 6: จำนวนรถรวมสุทธิ
     const N_total = N_per_row * rows;
 
-    // แสดงผลข้อมูลตัวเลขบนหน้าจอเว็บแอป
     document.getElementById('result').innerText = `คำนวณได้: ${rows} แถว | รวมจอดรถได้ทั้งสิ้น: ${N_total} คัน (แถวละ ${N_per_row} คัน)`;
     
-    let infoText = `* ช่องทางวิ่งรถ (Aisle): ล็อกคงที่ ${W_aisle} เมตร | ระยะลึกซองจอดสุทธิ (L_projected): ${L_projected.toFixed(2)} เมตร`;
+    let infoText = `* ช่องทางวิ่งรถ (Road): ${R.toFixed(1)} เมตร | ระยะลึกซองจอดสุทธิ (L_projected): ${L_projected.toFixed(2)} เมตร`;
     if (thetaDeg === 0) {
-        infoText += ` | 💡 ระบบแนวขนาน: คิดตามสูตรความยาวช่อง 6 เมตร และระยะลึก 2.5 เมตร`;
+        infoText += ` | 💡 ระบบขนาน: ใช้สมการ ⌊(D - W_car) / (W_car + R)⌋ + 1`;
     } else if (interlockingSave > 0 && rows > 1) {
         infoText += ` | 🎉 ระบบหัวชนหัวช่วยลดขนาดพื้นที่ซ้อนทับแนวลึกลงแถวละ ${interlockingSave.toFixed(2)} เมตร`;
     }
     document.getElementById('debugInfo').innerText = infoText;
 
-    // เรียกฟังก์ชันวาดภาพบน Canvas
-    drawCanvas(L_total, W_total, W_car, L_car, thetaDeg, N_per_row, rows, L_projected, W_aisle, layoutStyle, interlockingSave);
+    // ส่งตัวแปรเข้าฟังก์ชันวาด Canvas
+    drawCanvas(H, D, W_car, L_car, thetaDeg, N_per_row, rows, L_projected, R, layoutStyle, interlockingSave, minAisleWidth);
 }
 
-function drawCanvas(L_total, W_total, W_car, L_car, theta, N, rows, L_projected, W_aisle, layoutStyle, interlockingSave) {
+function drawCanvas(L_total, W_total, W_car, L_car, theta, N, rows, L_projected, W_aisle, layoutStyle, interlockingSave, minAisleWidth) {
     const canvas = document.getElementById('parkingCanvas');
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -210,33 +256,34 @@ function drawCanvas(L_total, W_total, W_car, L_car, theta, N, rows, L_projected,
     const startX = 40;
     const startY = 35;
 
-    // วาดขอบเขตที่ดินทั้งหมด (เส้นประสีเทา)
     ctx.strokeStyle = "#555"; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
     ctx.strokeRect(startX, startY, L_total * scale, W_total * scale); ctx.setLineDash([]);
 
     if (rows === 0 || N === 0) {
         ctx.fillStyle = "#e74c3c"; ctx.font = "18px Sarabun";
-        ctx.fillText("❌ ขนาดพื้นที่กว้างไม่พอสำหรับทางวิ่ง 6 เมตร และแถวจอดรถตามมาตรฐาน", startX + 20, startY + 50);
+        ctx.fillText(`❌ ขนาดพื้นที่กว้างไม่พอสำหรับทางวิ่ง ${W_aisle} เมตร และแถวจอดรถตามมาตรฐาน`, startX + 20, startY + 50);
         return;
     }
 
     for (let r = 0; r < rows; r++) {
-        let currentY;
+        let currentY = 0;
         
-        // คำนวณพิกัด Y ของแต่ละแถวตามรูปแบบการจัดวาง
         if (layoutStyle === "interlocking" && theta > 0 && theta < 90) {
             let pairs = Math.floor(r / 2);
             let single = r % 2;
-            let currentMetres = (r * (L_projected + W_aisle)) - (pairs * interlockingSave);
-            if (single === 1) {
-                currentMetres -= (interlockingSave * 0.95); 
+            let blockDepth = (2 * L_projected) - interlockingSave + W_aisle;
+            
+            let currentMetres = 0;
+            if (single === 0) {
+                currentMetres = pairs * blockDepth;
+            } else {
+                currentMetres = (pairs * blockDepth) + (2 * L_projected - interlockingSave);
             }
             currentY = startY + (currentMetres * scale);
         } else {
             currentY = startY + (r * (L_projected + W_aisle) * scale);
         }
 
-        // กำหนดทิศทางการเอียงเพื่อให้ "หัวรถชนหัวรถ" หันเข้าหากันในแบบ Interlocking
         let direction = 1; 
         if (layoutStyle === "interlocking" && theta > 0 && theta < 90) {
             direction = (r % 2 === 0) ? 1 : -1;
@@ -246,64 +293,81 @@ function drawCanvas(L_total, W_total, W_car, L_car, theta, N, rows, L_projected,
         ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2.5; ctx.beginPath();
         ctx.moveTo(startX, currentY); ctx.lineTo(startX + (L_total * scale), currentY); ctx.stroke();
 
-        // วาดเส้นซองจอดรถ (สีเหลือง)
         ctx.strokeStyle = "#f1c40f"; ctx.lineWidth = 1.2;
 
         if (theta === 0) {
-            // 🚗 วาดกรณีจอดแนวขนานติดขอบทางตามสูตร (ยาวช่องละ 6 เมตร ลึก 2.5 เมตร)
-            const slotLength = 6.0 * scale;
+            const slotLength = (L_car + 0.5) * scale; 
             const slotWidth = W_car * scale;
             for (let i = 0; i < N; i++) {
                 ctx.strokeRect(startX + (i * slotLength), currentY, slotLength, slotWidth);
             }
         } else if (theta === 90) {
-            // 🚗 วาดกรณีมุมฉาก 90 องศาตรงๆ
             const slotWidth = W_car * scale;
             for (let i = 0; i < N; i++) {
                 ctx.strokeRect(startX + (i * slotWidth), currentY, slotWidth, L_car * scale);
             }
         } else {
-            // 🚗 วาดกรณีมุมเฉียงคำนวณด้วยฟังก์ชันตรีโกณมิติ
             const rad = theta * Math.PI / 180;
             const wastedSpace = L_car * Math.cos(rad) * scale;
             const effectiveWidth = (W_car / Math.sin(rad)) * scale;
 
             let offsetX = 0;
-            if (layoutStyle === "interlocking" && r % 2 !== 0) {
-                offsetX = effectiveWidth / 2; // ขยับเยื้องครึ่งช่องสลับฟันปลาตอนหัวชนหัว
+            let drawLengthRatio = 1;
+
+            if (layoutStyle === "interlocking") {
+                if (r % 2 !== 0) {
+                    offsetX = effectiveWidth / 2;
+                }
+                drawLengthRatio = (L_projected - (interlockingSave / 2)) / L_projected;
             }
 
-            // เริ่มขีดเส้นเฉียงตามจำนวนคันที่คำนวณได้โดยอิงระยะ Wasted Space หัวท้าย
+            let lineDx = L_car * Math.cos(rad) * scale * drawLengthRatio;
+            let lineDy = L_car * Math.sin(rad) * scale * direction * drawLengthRatio;
+
             for (let i = 0; i <= N; i++) {
                 let currX = startX + wastedSpace + (i * effectiveWidth) + offsetX;
                 if (currX <= startX + (L_total * scale) && currX >= startX) {
                     ctx.beginPath();
                     ctx.moveTo(currX, currentY);
-                    ctx.lineTo(currX + (L_car * Math.cos(rad) * scale), currentY + (L_car * Math.sin(rad) * scale * direction));
+                    ctx.lineTo(currX + lineDx, currentY + lineDy);
                     ctx.stroke();
                 }
             }
 
-            // วาดเส้นสีขาวปิดก้นซองจอดรถเฉียง
+            // วาดเส้นแบ่งกึ่งกลางตรงจุดที่หัวรถมาบรรจบกัน
             ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5; ctx.beginPath();
-            let endY = currentY + (L_car * Math.sin(rad) * scale * direction);
+            let endY = currentY + lineDy;
             ctx.moveTo(startX + wastedSpace + offsetX, endY);
             ctx.lineTo(startX + wastedSpace + (N * effectiveWidth) + offsetX, endY);
             ctx.stroke();
         }
         
-        // วาดข้อความแสดงช่องทางวิ่งรถขนาด 6.0 เมตรระหว่างบล็อก
+        // วาดข้อความแสดงช่องทางวิ่งรถ
         if(r < rows - 1 && (r % 2 === 1 || layoutStyle === "standard" || theta === 0 || theta === 90)) {
             ctx.fillStyle = "#888"; ctx.font = "11px Sarabun";
-            let textY = currentY + (L_projected * scale) + (W_aisle * scale / 2);
-            if (layoutStyle === "interlocking" && r % 2 === 1 && theta < 90 && theta > 0) {
+            let textY = 0;
+            if (layoutStyle === "interlocking" && theta > 0 && theta < 90) {
                 textY = currentY + (W_aisle * scale / 2);
+            } else {
+                textY = currentY + (L_projected * scale) + (W_aisle * scale / 2);
             }
-            ctx.fillText(" ↔️ ทางวิ่งรถยนต์สวนกัน (Aisle Width) ปลอดภัยคงที่ 6.0 เมตร ", startX + (L_total * scale)/4, textY);
+            ctx.fillText(` ↔️ ช่องทางวิ่งรถยนต์ (Road Width) ${W_aisle.toFixed(1)} เมตร `, startX + (L_total * scale)/4, textY);
         }
+    }
+
+    // คำเตือนหากทางวิ่งแคบเกินไป
+    if (W_aisle < minAisleWidth && theta !== 0) {
+        ctx.fillStyle = "rgba(231, 76, 60, 0.9)"; 
+        ctx.fillRect(0, 0, canvas.width, canvas.height); 
+
+        ctx.fillStyle = "#fff"; ctx.font = "bold 24px Sarabun"; ctx.textAlign = "center";
+        ctx.fillText(`⚠️ ความกว้างทางวิ่ง ${W_aisle} เมตรแคบเกินไป จอดจริงไม่ได้`, canvas.width / 2, canvas.height / 2 - 15);
+        ctx.font = "16px Sarabun";
+        ctx.fillText(`แนะนำขั้นต่ำ ${minAisleWidth.toFixed(1)} เมตรสำหรับเลนเดียวที่มีรถจอดสองฝั่ง`, canvas.width / 2, canvas.height / 2 + 15);
     }
 }
 
+// เรียกใช้ครั้งแรกตอนโหลดหน้าเว็บ
 calculateParking();
 </script>
 
